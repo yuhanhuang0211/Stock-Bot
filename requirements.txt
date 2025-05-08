@@ -1,8 +1,8 @@
-google-generativeai
+google-generativeai==0.5.2
 python-dotenv
 twstock
 pandas
 matplotlib
 cloudinary
 flask
-line-bot-sdk
+line-bot-sdk==2.4.1
