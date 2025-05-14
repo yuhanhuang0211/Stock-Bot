@@ -1,7 +1,7 @@
 import os
 import requests
-from newspaper import Article, Config as NewspaperConfig # 引入 Config
-from googlesearch import search as Google Search_func # 重新命名以避免與本地變數衝突
+from newspaper import Article, Config as NewspaperConfig
+from googlesearch import search as Google_Search_func
 import google.generativeai as genai # 用於 Gemini 摘要
 from dotenv import load_dotenv
 import logging
@@ -11,9 +11,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 
 load_dotenv()
 
-# Gemini Configuration (假設 API Key 已在 .env 中設定)
-# 實際應用中，Gemini 相關的初始化和函式應該放在共享的 service 模組中
-# 例如 services/gemini_service.py
 try:
     gemini_api_key = os.getenv("GEMINI_API_KEY")
     if not gemini_api_key:
@@ -35,7 +32,7 @@ def summarize_text_with_gemini(title: str, text_content: str, query_context: str
     回傳:
         str: Gemini 生成的摘要，或錯誤訊息。
     """
-    if not genai.get_api_key():
+    if not gemini_api_key:
         logging.error("Gemini API key not configured. Cannot summarize text.")
         return "錯誤：AI 摘要服務未設定。"
 
@@ -110,9 +107,9 @@ def get_first_news_url_from_google(query: str, lang: str = "zh-TW") -> str | Non
         logging.info(f"開始搜尋新聞，關鍵字: '{query}', 語言: {lang}")
         # num_results 設為少量，例如 3-5，然後從中挑選
         # pause 參數可以減緩請求速率，避免被 Google 短期封鎖
-        search_results_iterator = Google Search_func(
-            query=f"{query} site:news.google.com OR news", # 嘗試引導到新聞源，或在查詢中加入 "news"
-            num_results=5,
+        search_results_iterator = Google_Search_func(
+            f"{query} site:news.google.com OR news", # 嘗試引導到新聞源，或在查詢中加入 "news"
+            num=5,
             lang=lang,
             pause=2.0 # 每次請求間隔2秒
         )
@@ -224,13 +221,12 @@ if __name__ == "__main__":
     # os.environ["GEMINI_API_KEY"] = "YOUR_GEMINI_API_KEY_HERE_FOR_TESTING"
     # genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
 
-    if not genai.get_api_key():
+    if not gemini_api_key:
         print("警告: Gemini API Key 未設定，部分測試可能無法完整執行或會回傳錯誤。")
         print("請在 .env 檔案中設定 GEMINI_API_KEY，或在測試程式碼中臨時設定。")
 
     test_queries = [
         "台積電股價",
-        # "今日台灣股市焦點新聞", # 這個查詢可能太廣泛
         "聯發科最新AI晶片發布",
         "長榮海運股東會",
         "一個不存在的奇異關鍵詞看看會發生什麼事" # 測試找不到新聞的情況
@@ -245,7 +241,7 @@ if __name__ == "__main__":
     # 測試特定 URL (假設有此新聞)
     # print("\n--- 測試特定 URL ---")
     # test_url = "https://udn.com/news/story/7238/7937680" # 請替換為一個有效的、不太會變動的新聞URL作測試
-    # if genai.get_api_key(): # 只有在 API Key 設定時才執行，因為會用到 Gemini
+    # if gemini_api_key(): # 只有在 API Key 設定時才執行，因為會用到 Gemini
     #     url_summary = extract_and_summarize_news_article(test_url, "測試特定URL")
     #     print(url_summary)
     # else:

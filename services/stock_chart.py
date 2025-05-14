@@ -99,7 +99,7 @@ DEFAULT_STOCK_DATA = {
 # --- Gemini 相關函式 (可考慮移至 gemini_service.py) ---
 def chat_with_gemini(prompt: str) -> str:
     """與 Gemini Pro 模型進行對話。"""
-    if not genai.get_api_key():
+    if not gemini_api_key:
         return "Gemini API 未設定，無法進行對話。"
     try:
         model = genai.GenerativeModel('gemini-pro')
@@ -124,7 +124,7 @@ def extract_stock_id_from_text(user_input: str) -> list[str] | None:
 
     # 2. 如果 regex 沒找到，且使用者輸入了非數字（可能是公司名稱），嘗試使用 Gemini
     #    僅在輸入看起來不是純粹的股票代碼時才調用 Gemini，以節省 API call
-    if not user_input.isdigit() and genai.get_api_key():
+    if not user_input.isdigit() and gemini_api_key:
         logging.info(f"Regex 未找到股票代碼，嘗試使用 Gemini 提取: '{user_input}'")
         try:
             model = genai.GenerativeModel('gemini-pro')
