@@ -6,3 +6,5 @@ matplotlib
 cloudinary
 flask
 line-bot-sdk==2.4.1
+requests
+newspaper3k
