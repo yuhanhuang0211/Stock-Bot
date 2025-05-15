@@ -17,8 +17,14 @@ line_secret = os.getenv('LINE_SECRET')
 # Gemini API 金鑰
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 
-if not line_token or not line_secret or not gemini_api_key:
-    raise ValueError("環境變數未設定完全")
+if not line_token:
+    raise ValueError("環境變數未設定完全 - LINE token")
+
+if not line_secret:
+    raise ValueError("環境變數未設定完全 - LINE secret")
+
+if not gemini_api_key:
+    raise ValueError("環境變數未設定完全 - Gemini API")
 
 # 初始化 LINE bot
 line_bot_api = LineBotApi(line_token)
@@ -26,7 +32,7 @@ handler = WebhookHandler(line_secret)
 
 # 初始化 Gemini
 genai.configure(api_key=gemini_api_key)
-model = genai.GenerativeModel("gemini-pro")
+model = genai.GenerativeModel("gemini-1.5-flash")
 
 # 啟動 Flask App
 app = Flask(__name__)
