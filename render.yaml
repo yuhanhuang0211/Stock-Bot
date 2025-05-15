@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: stock-line-bot
+    name: Stock-Bot
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: python app.py
