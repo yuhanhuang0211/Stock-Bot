@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: stock-line-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    plan: free
+    envVars:
+      - key: LINE_TOKEN
+        sync: false
+      - key: LINE_SECRET
+        sync: false
+      - key: SEARCH_API_KEY
+        sync: false
+      - key: SEARCH_ENGINE_ID
+        sync: false
