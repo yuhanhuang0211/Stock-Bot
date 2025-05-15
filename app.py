@@ -1,93 +1,68 @@
-from flask import Flask, request, jsonify
-from stock_chart import extract_stock_id, process_user_input, txt_to_img_url
-from stock_price import get_stock_price
-from news_summary import process_news_query  # 假設你有這個模組
-from dotenv import load_dotenv
 import os
+from dotenv import load_dotenv
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from linebot.exceptions import InvalidSignatureError
 import google.generativeai as genai
+import logging
 
+# 載入 .env
 load_dotenv()
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
+# LINE Token / Secret
+line_token = os.getenv('LINE_TOKEN')
+line_secret = os.getenv('LINE_SECRET')
+
+# Gemini API 金鑰
+gemini_api_key = os.getenv('GEMINI_API_KEY')
+
+if not line_token or not line_secret or not gemini_api_key:
+    raise ValueError("環境變數未設定完全")
+
+# 初始化 LINE bot
+line_bot_api = LineBotApi(line_token)
+handler = WebhookHandler(line_secret)
+
+# 初始化 Gemini
+genai.configure(api_key=gemini_api_key)
+model = genai.GenerativeModel("gemini-pro")
+
+# 啟動 Flask App
 app = Flask(__name__)
+app.logger.setLevel(logging.DEBUG)
 
-# Gemini 基本聊天功能
-def chat_with_gemini(prompt: str) -> str:
+@app.route("/", methods=['POST'])
+def callback():
+    signature = request.headers['X-Line-Signature']
+    body = request.get_data(as_text=True)
+    app.logger.info(f"Request body: {body}")
+
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        return response.text.strip()
-    except Exception as e:
-        return f"Gemini API 錯誤：{e}"
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
 
-@app.route('/')
-def index():
-    return "🎉 歡迎使用股市分析 API（整合 Gemini + twstock + Cloudinary）"
+    return 'OK'
 
-@app.route('/chat', methods=['POST'])
-def chat():
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_message = event.message.text
+    app.logger.info(f"收到訊息: {user_message}")
+
+    # 使用 Gemini 回覆
     try:
-        user_input = request.json.get('message')
-        if not user_input:
-            return jsonify({'error': '請提供輸入訊息'}), 400
-
-        stock_ids = extract_stock_id(user_input)
-
-        # 如果提到股票代碼或公司名稱
-        if stock_ids:
-            reply_text = process_user_input(user_input)
-            chart_urls = []
-
-            for sid in stock_ids:
-                url = txt_to_img_url(sid)
-                if url:
-                    chart_urls.append(url)
-
-            return jsonify({
-                'reply': reply_text,
-                'charts': chart_urls
-            })
-
-        # 純粹問 Gemini 的問題
-        reply = chat_with_gemini(user_input)
-        return jsonify({'reply': reply})
-
+        response = model.generate_content(user_message)
+        reply_text = response.text.strip()
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Gemini 回應錯誤: {e}")
+        reply_text = "抱歉，我現在無法處理您的請求。"
 
-@app.route('/price', methods=['POST'])
-def price():
-    try:
-        user_input = request.json.get('message')
-        if not user_input:
-            return jsonify({'error': '請提供輸入訊息'}), 400
+    # 傳送回覆給使用者
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
 
-        stock_ids = extract_stock_id(user_input)
-
-        if stock_ids:
-            results = {}
-            for sid in stock_ids:
-                results[sid] = get_stock_price(sid)
-            return jsonify({'price_info': results})
-        else:
-            return jsonify({'error': '找不到股票代碼'}), 400
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/news_summary', methods=['POST'])
-def news_summary():
-    try:
-        user_input = request.json.get('message')
-        if not user_input:
-            return jsonify({'error': '請提供輸入訊息'}), 400
-
-        # 處理新聞摘要
-        summary = process_news_query(user_input)
-        return jsonify({'summary': summary})
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-if __name__ == '__main__':
-    app.run(debug=True)
+if __name__ == "__main__":
+    app.run(host='0.0.0.0', port=5000)

@@ -1,261 +1,239 @@
 import os
-import requests
-from newspaper import Article, Config as NewspaperConfig # 引入 Config
-from googlesearch import search as Google Search_func # 重新命名以避免與本地變數衝突
-import google.generativeai as genai # 用於 Gemini 摘要
+import datetime
 from dotenv import load_dotenv
+from flask import Flask, request, abort
+from linebot import LineBotApi, WebhookHandler
+from linebot.models import MessageEvent, TextMessage, TextSendMessage
+from googleapiclient.discovery import build
+from newspaper import Article
+import requests
+from urllib.parse import urlparse
 import logging
 
-# --- 基本設定 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(funcName)s - %(message)s')
+# 設置日誌
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
+# 載入 .env 環境變數
 load_dotenv()
 
-# Gemini Configuration (假設 API Key 已在 .env 中設定)
-# 實際應用中，Gemini 相關的初始化和函式應該放在共享的 service 模組中
-# 例如 services/gemini_service.py
-try:
-    gemini_api_key = os.getenv("GEMINI_API_KEY")
-    if not gemini_api_key:
-        logging.warning("GEMINI_API_KEY not found in .env file. News summarization via Gemini will fail.")
-    else:
-        genai.configure(api_key=gemini_api_key)
-except Exception as e:
-    logging.error(f"Error configuring Gemini for news summary: {e}")
+# 讀取環境變數
+LINE_TOKEN = os.getenv('LINE_TOKEN')
+LINE_SECRET = os.getenv('LINE_SECRET')
+SEARCH_API_KEY = os.getenv('SEARCH_API_KEY')
+SEARCH_ENGINE_ID = os.getenv('SEARCH_ENGINE_ID')
 
-# --- 輔助函式 (Gemini 摘要) ---
-# 注意：此函式理想情況下應從共享的 gemini_service.py 匯入
-def summarize_text_with_gemini(title: str, text_content: str, query_context: str = "") -> str:
-    """
-    使用 Gemini API 對提供的文本內容進行摘要。
-    參數:
-        title (str): 文章標題。
-        text_content (str): 文章完整內容。
-        query_context (str): 使用者原始的查詢關鍵字，提供上下文。
-    回傳:
-        str: Gemini 生成的摘要，或錯誤訊息。
-    """
-    if not genai.get_api_key():
-        logging.error("Gemini API key not configured. Cannot summarize text.")
-        return "錯誤：AI 摘要服務未設定。"
+# 確保所有環境變數都有值
+assert LINE_TOKEN, "缺少 LINE_TOKEN"
+assert LINE_SECRET, "缺少 LINE_SECRET"
+assert SEARCH_API_KEY, "缺少 SEARCH_API_KEY"
+assert SEARCH_ENGINE_ID, "缺少 SEARCH_ENGINE_ID"
 
-    # 移除過多的空白和換行，以優化 token 使用
-    text_content_cleaned = "\n".join([line.strip() for line in text_content.splitlines() if line.strip()])
-    
-    # 限制內容長度以避免超出 Gemini 的 token 限制 (gemini-pro 通常有 32k token 限制)
-    # 一個中文字符約等於 2-3 token，保守估計，例如限制 8000 字
-    max_chars = 8000
-    if len(text_content_cleaned) > max_chars:
-        text_content_cleaned = text_content_cleaned[:max_chars]
-        logging.warning(f"News content for title '{title}' was truncated to {max_chars} characters for Gemini summary.")
+# 初始化 LINE Bot
+line_bot_api = LineBotApi(LINE_TOKEN)
+handler = WebhookHandler(LINE_SECRET)
 
-    if not text_content_cleaned.strip():
-        logging.warning(f"No text content to summarize for title '{title}'.")
-        return "錯誤：文章內容為空，無法摘要。"
+# 記錄使用者狀態與上下文
+user_states = {}
+user_contexts = {}
 
+# 建立 Flask App
+app = Flask(__name__)
+
+# Google 搜尋新聞
+def google_search_news(query):
     try:
-        model = genai.GenerativeModel('gemini-pro')
-        prompt = f"""
-        請你扮演一個專業的新聞編輯。
-        這是使用者原始的查詢意圖：「{query_context}」。
-        以下是一則新聞：
-        標題：{title}
-        內容：
-        {text_content_cleaned}
-
-        請根據以上新聞內容，針對使用者的查詢意圖，提供一段約 150-250 字的中文摘要。
-        摘要應當客觀、準確地反映新聞的核心資訊。
-        如果內容不相關或無法有效摘要，請說明原因。
-        """
+        service = build("customsearch", "v1", developerKey=SEARCH_API_KEY)
+        res = service.cse().list(
+            q=query,
+            cx=SEARCH_ENGINE_ID,
+            num=5,  # 獲取更多結果以便篩選
+            dateRestrict="d7",  # 限制為最近7天的新聞
+            sort="date",  # 按日期排序
+            searchType="news"  # 指定搜索新聞
+        ).execute()
         
-        response = model.generate_content(prompt)
-        summary = response.text.strip()
+        # 檢查是否有搜索結果
+        if "items" not in res or len(res["items"]) == 0:
+            logger.info(f"搜尋 '{query}' 沒有找到任何結果")
+            return None, None
         
-        # 有時 Gemini 可能會回傳無法摘要的訊息，這也是一種有效的「摘要」
-        # 例如 "根據提供的內容，無法有效摘要..."
-        if not summary:
-            return "錯誤：AI 未能生成摘要。"
-        return summary
-        
-    except Exception as e:
-        logging.error(f"Gemini API 錯誤 (summarize_text_with_gemini for title '{title}'): {e}")
-        # 檢查是否有 parts 且包含 'text' (來自 response.parts)
-        # 有時錯誤物件可能包含部分 Gemini 的回應
-        try:
-            # response.prompt_feedback 會有 BLOCKED 的情況
-            if response and response.prompt_feedback and str(response.prompt_feedback.block_reason) != "BLOCK_REASON_UNSPECIFIED":
-                 logging.error(f"Gemini content blocked: {response.prompt_feedback.block_reason}")
-                 return f"無法生成摘要：內容可能違反使用政策 ({response.prompt_feedback.block_reason})。"
-        except AttributeError: # response 物件可能沒有 prompt_feedback
-            pass
-        return f"錯誤：AI 摘要時發生問題 ({type(e).__name__})。"
-
-# --- 核心新聞處理函式 ---
-def get_first_news_url_from_google(query: str, lang: str = "zh-TW") -> str | None:
-    """
-    使用 googlesearch-python 根據關鍵字搜尋 Google 並取得第一個看起來是新聞的網址。
-    參數:
-        query (str): 搜尋關鍵字。
-        lang (str): 搜尋語言，預設為 'zh-TW'。
-    回傳:
-        str: 第一個新聞網址，或 None (若找不到或發生錯誤)。
-    """
-    try:
-        # 增加 user_agent 可能有助於減少被阻擋的機率，但 googlesearch-python 可能內部已處理
-        # 查詢時加入 "新聞" 或 "news" 字眼，並限定搜尋結果數量
-        # tbs=nrt:8 (新聞類別)， qdr:d (過去一天) 或 qdr:w (過去一週) 可以增加時效性
-        # 不過 googlesearch-python 可能不直接支援 tbs 參數，這通常是在 URL 中
-        # 這裡的 'query' 參數是給 Google Search 的，不是給新聞網站的
-        
-        logging.info(f"開始搜尋新聞，關鍵字: '{query}', 語言: {lang}")
-        # num_results 設為少量，例如 3-5，然後從中挑選
-        # pause 參數可以減緩請求速率，避免被 Google 短期封鎖
-        search_results_iterator = Google Search_func(
-            query=f"{query} site:news.google.com OR news", # 嘗試引導到新聞源，或在查詢中加入 "news"
-            num_results=5,
-            lang=lang,
-            pause=2.0 # 每次請求間隔2秒
-        )
-        
-        search_results = list(search_results_iterator) # 將迭代器轉為列表
-
-        if search_results:
-            # 可以加入一些簡單的 URL 過濾邏輯，例如排除社交媒體或影片網站
-            # 但這會增加複雜性。目前直接取第一個。
-            first_url = search_results[0]
-            logging.info(f"找到第一個搜尋結果 URL: {first_url}")
-            return first_url
-        else:
-            logging.warning(f"關鍵字 '{query}' 查無 Google 搜尋結果。")
-            return None
+        # 遍歷結果，找到合適的新聞
+        for item in res["items"]:
+            url = item.get("link", "")
+            domain = urlparse(url).netloc
             
-    except requests.exceptions.HTTPError as e: # googlesearch-python 底層用 requests
-        if e.response.status_code == 429:
-            logging.error(f"Google 搜尋請求過於頻繁 (429 Client Error). Query: '{query}'. {e}")
-            return "搜尋請求過於頻繁，請稍後再試。" # 特殊錯誤碼回傳給上層處理
-        logging.error(f"Google 搜尋時發生 HTTP 錯誤. Query: '{query}'. {e}")
-        return None
+            # 檢查URL是否可訪問
+            try:
+                head_response = requests.head(url, timeout=3)
+                if head_response.status_code == 200:
+                    return url, item
+            except Exception as e:
+                logger.warning(f"檢查URL時發生錯誤: {url}, {str(e)}")
+                continue
+        
+        # 如果沒有找到可訪問的URL，返回第一個結果
+        if len(res["items"]) > 0:
+            return res["items"][0]["link"], res["items"][0]
+            
+        return None, None
     except Exception as e:
-        # 需要注意，如果 googlesearch-python 因 IP 被封鎖拋出特定例外，應在此處捕捉
-        logging.error(f"Google 搜尋時發生未知錯誤. Query: '{query}'. Error: {e} ({type(e).__name__})")
-        return None
+        logger.error(f"Google搜尋時發生錯誤: {str(e)}")
+        return None, None
 
+# 文章摘要
+def summarize_article(url, item=None):
+    try:
+        article = Article(url, language='zh')
+        article.download()
+        article.parse()
+        article.nlp()
+        
+        # 提取發佈日期
+        publish_date = None
+        if article.publish_date:
+            publish_date = article.publish_date.strftime("%Y-%m-%d")
+        elif item and "pagemap" in item and "metatags" in item["pagemap"] and len(item["pagemap"]["metatags"]) > 0:
+            meta = item["pagemap"]["metatags"][0]
+            if "article:published_time" in meta:
+                publish_date = meta["article:published_time"].split('T')[0]
+                
+        # 提取來源
+        source = urlparse(url).netloc
+        
+        # 取得標題
+        title = article.title
+        
+        # 如果無法從文章獲取標題，嘗試從搜索結果獲取
+        if not title and item:
+            title = item.get("title", "")
+            
+        # 取得摘要
+        summary = article.summary
+        
+        return {
+            "title": title,
+            "summary": summary,
+            "publish_date": publish_date,
+            "source": source,
+            "url": url
+        }
+    except Exception as e:
+        logger.error(f"摘要文章時發生錯誤: {url}, {str(e)}")
+        # 如果處理失敗但有搜索結果項目，提供基本信息
+        if item:
+            return {
+                "title": item.get("title", "無法獲取標題"),
+                "summary": item.get("snippet", "無法獲取摘要"),
+                "publish_date": None,
+                "source": urlparse(url).netloc,
+                "url": url,
+                "error": str(e)
+            }
+        raise e
 
-def extract_and_summarize_news_article(url: str, user_query: str) -> str:
-    """
-    抓取指定 URL 的新聞文章內容，並使用 Gemini 進行摘要。
-    參數:
-        url (str): 新聞文章的 URL。
-        user_query (str): 使用者原始的查詢關鍵字，用於摘要上下文。
-    回傳:
-        str: 包含標題和 Gemini 摘要的字串，或錯誤訊息。
-    """
-    if not url or not url.startswith(('http://', 'https://')):
-        logging.error(f"提供的 URL 無效: {url}")
-        return "錯誤：提供的網址無效。"
+# 處理 LINE 訊息事件
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_id = event.source.user_id
+    msg = event.message.text.strip()
 
     try:
-        # 設定 newspaper Article 的組態
-        config = NewspaperConfig()
-        config.browser_user_agent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-        config.request_timeout = 15  # seconds for download
-        config.memoize_articles = False # 禁用快取，確保每次都重新下載
-        config.fetch_images = False # 不需要圖片
-        # config.language = 'zh' # 如果確定是中文新聞，可以指定
-
-        article = Article(url, config=config)
+        logger.info(f"收到來自用戶 {user_id} 的訊息: {msg}")
         
-        logging.info(f"開始下載文章: {url}")
-        article.download()
-        
-        logging.info(f"開始解析文章: {url}")
-        article.parse()
-
-        if not article.title or not article.text:
-            logging.warning(f"無法從 {url} 提取到標題或內容。Title: '{article.title}', Text length: {len(article.text)}")
-            return f"錯誤：無法從指定網址提取有效的文章內容。可能是網頁結構不支援或內容為空。"
-
-        logging.info(f"文章提取成功: '{article.title}'，準備進行 Gemini 摘要。")
-        
-        # 使用 Gemini 進行摘要
-        gemini_summary = summarize_text_with_gemini(article.title, article.text, user_query)
-        
-        # 組合最終回傳結果
-        # 如果 Gemini 摘要本身就是一個錯誤訊息，直接回傳
-        if gemini_summary.startswith("錯誤："):
-            return f"標題：{article.title}\n{gemini_summary}"
+        if msg == "我想知道最新時事！":
+            user_states[user_id] = "waiting_for_keyword"
+            reply = "交給我吧！請輸入欲查詢的關鍵字句"
+        elif user_states.get(user_id) == "waiting_for_keyword":
+            user_states[user_id] = "idle"  # 重置狀態
+            
+            # 記錄搜索關鍵字
+            user_contexts[user_id] = {"last_query": msg}
+            
+            logger.info(f"搜尋關鍵字: {msg}")
+            news_url, item = google_search_news(msg)
+            
+            if news_url:
+                try:
+                    article_data = summarize_article(news_url, item)
+                    
+                    # 格式化回覆訊息
+                    reply_parts = []
+                    
+                    # 添加標題
+                    if article_data.get("title"):
+                        reply_parts.append(f"📰 {article_data['title']}")
+                    
+                    # 添加發布日期
+                    if article_data.get("publish_date"):
+                        reply_parts.append(f"📅 發布日期: {article_data['publish_date']}")
+                    
+                    # 添加來源
+                    if article_data.get("source"):
+                        reply_parts.append(f"🔍 來源: {article_data['source']}")
+                    
+                    # 添加分隔線
+                    reply_parts.append("─────────────────")
+                    
+                    # 添加摘要
+                    if article_data.get("summary"):
+                        reply_parts.append(f"📄 新聞摘要:\n{article_data['summary']}")
+                    
+                    # 添加分隔線
+                    reply_parts.append("─────────────────")
+                    
+                    # 添加URL (確保在最後)
+                    reply_parts.append(f"🔗 完整新聞: {news_url}")
+                    
+                    reply = "\n\n".join(reply_parts)
+                    
+                except Exception as e:
+                    logger.error(f"處理文章時發生錯誤: {str(e)}")
+                    reply = f"找到新聞了，但內容無法完整解析。\n\n🔗 新聞連結: {news_url}\n\n💡 您可以嘗試換個關鍵字，再次輸入「我想知道最新時事！」"
+            else:
+                reply = "找不到相關新聞，請換個關鍵字再試看看！"
         else:
-            return f"標題：{article.title}\n摘要：\n{gemini_summary}\n\n來源：{url}"
-
+            # 如果不是預期的指令或狀態，保持安靜不回應
+            # 不回覆任何訊息，但仍記錄操作
+            logger.info(f"用戶 {user_id} 發送了非預期訊息，不進行回覆")
+            return
+    
     except Exception as e:
-        logging.error(f"處理文章 {url} 時發生錯誤: {e} ({type(e).__name__})")
-        # article.download() 或 article.parse() 可能會拋出各種錯誤
-        return f"錯誤：讀取或分析文章失敗 ({type(e).__name__})。\n網址：{url}"
+        logger.error(f"處理訊息時發生錯誤: {str(e)}")
+        reply = "處理您的請求時發生錯誤，請稍後再試。"
 
-# --- 主要處理流程函式 ---
-def process_news_query_and_get_summary(user_query: str) -> str:
-    """
-    處理使用者的新聞查詢：搜尋 -> 提取 -> Gemini 摘要。
-    參數:
-        user_query (str): 使用者的查詢關鍵字句。
-    回傳:
-        str: 新聞摘要結果或錯誤/提示訊息。
-    """
-    logging.info(f"接收到新聞查詢: '{user_query}'")
+    # 發送回覆
+    try:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply)
+        )
+        logger.info(f"成功回覆用戶 {user_id}")
+    except Exception as e:
+        logger.error(f"發送回覆時發生錯誤: {str(e)}")
+
+# Webhook 路由
+@app.route("/callback", methods=['POST'])
+def callback():
+    signature = request.headers.get('X-Line-Signature')
+    body = request.get_data(as_text=True)
+
+    logger.info("收到 webhook 請求")
     
-    # 1. 取得新聞 URL
-    news_url = get_first_news_url_from_google(user_query)
+    try:
+        handler.handle(body, signature)
+    except Exception as e:
+        logger.error(f"處理 webhook 時發生錯誤: {str(e)}")
+        abort(400)
 
-    if news_url is None:
-        return "抱歉，目前無法找到與「{user_query}」相關的新聞，請檢查關鍵字或稍後再試。"
-    if news_url == "搜尋請求過於頻繁，請稍後再試。": # 特殊錯誤訊息
-        return news_url
+    return 'OK'
 
-    # 2. 提取並摘要新聞
-    summary_result = extract_and_summarize_news_article(news_url, user_query)
-    
-    return summary_result
+# 健康檢查路由
+@app.route("/health", methods=['GET'])
+def health_check():
+    return "OK", 200
 
-# --- 主函式 (用於直接執行此檔案進行測試) ---
+# 本地啟動用
 if __name__ == "__main__":
-    logging.info("開始測試 news_summary.py...")
-
-    # 設定測試用的 API Key (如果 .env 中沒有或想覆寫)
-    # os.environ["GEMINI_API_KEY"] = "YOUR_GEMINI_API_KEY_HERE_FOR_TESTING"
-    # genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-
-    if not genai.get_api_key():
-        print("警告: Gemini API Key 未設定，部分測試可能無法完整執行或會回傳錯誤。")
-        print("請在 .env 檔案中設定 GEMINI_API_KEY，或在測試程式碼中臨時設定。")
-
-    test_queries = [
-        "台積電股價",
-        # "今日台灣股市焦點新聞", # 這個查詢可能太廣泛
-        "聯發科最新AI晶片發布",
-        "長榮海運股東會",
-        "一個不存在的奇異關鍵詞看看會發生什麼事" # 測試找不到新聞的情況
-    ]
-
-    for query in test_queries:
-        print(f"\n--- 測試查詢: '{query}' ---")
-        result = process_news_query_and_get_summary(query)
-        print(result)
-        print("--------------------------------------")
-    
-    # 測試特定 URL (假設有此新聞)
-    # print("\n--- 測試特定 URL ---")
-    # test_url = "https://udn.com/news/story/7238/7937680" # 請替換為一個有效的、不太會變動的新聞URL作測試
-    # if genai.get_api_key(): # 只有在 API Key 設定時才執行，因為會用到 Gemini
-    #     url_summary = extract_and_summarize_news_article(test_url, "測試特定URL")
-    #     print(url_summary)
-    # else:
-    #     print(f"跳過特定 URL 測試 ({test_url})，因為 Gemini API Key 未設定。")
-    # print("--------------------------------------")
-
-    # 測試無效URL
-    print("\n--- 測試無效 URL ---")
-    invalid_url_summary = extract_and_summarize_news_article("htp://not_a_valid_url.com/story", "測試無效URL")
-    print(invalid_url_summary)
-    print("--------------------------------------")
-    
-    logging.info("news_summary.py 測試結束。")
+    logger.info("啟動 LINE Bot 服務")
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
