@@ -3,7 +3,7 @@ services:
     name: Stock-Bot
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn app:app
+    startCommand: cd services && gunicorn app:app
     plan: free
     envVars:
       - key: LINE_TOKEN
