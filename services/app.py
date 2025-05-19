@@ -64,11 +64,11 @@ def handle_message(event):
 
     # 分流處理
     if user_message == "我想看股價！":
-        reply_text = handle_stock_price(event.source.user_id)
+        reply_text = get_stock_price(event.source.user_id)
     elif user_message == "我想看走勢圖！":
-        reply_text = handle_stock_chart(event.source.user_id)
+        reply_text = txt_to_img_url(event.source.user_id)
     elif user_message == "我想知道最新時事！":
-        reply_text = handle_news_summary(event.source.user_id)
+        reply_text = Google_search_news(event.source.user_id)
     else:
         # 預設使用 Gemini 回覆
         try:
