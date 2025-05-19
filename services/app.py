@@ -7,6 +7,11 @@ from linebot.exceptions import InvalidSignatureError
 import google.generativeai as genai
 import logging
 
+# 匯入三大功能模組
+from services.stock_price import handle_stock_price
+from services.stock_chart import handle_stock_chart
+from services.news_summary import handle_news_summary
+
 # 載入 .env
 load_dotenv()
 
@@ -17,14 +22,15 @@ line_secret = os.getenv('LINE_SECRET')
 # Gemini API 金鑰
 gemini_api_key = os.getenv('GEMINI_API_KEY')
 
-if not line_token:
-    raise ValueError("環境變數未設定完全 - LINE token")
+env_vars = {
+    "LINE token": line_token,
+    "LINE secret": line_secret,
+    "Gemini API": gemini_api_key
+}
 
-if not line_secret:
-    raise ValueError("環境變數未設定完全 - LINE secret")
-
-if not gemini_api_key:
-    raise ValueError("環境變數未設定完全 - Gemini API")
+for name, value in env_vars.items():
+    if not value:
+        raise ValueError(f"環境變數未設定完全 - {name}")
 
 # 初始化 LINE bot
 line_bot_api = LineBotApi(line_token)
@@ -53,18 +59,25 @@ def callback():
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_message = event.message.text
+    user_message = event.message.text.strip()
     app.logger.info(f"收到訊息: {user_message}")
 
-    # 使用 Gemini 回覆
-    try:
-        response = model.generate_content(user_message)
-        reply_text = response.text.strip()
-    except Exception as e:
-        app.logger.error(f"Gemini 回應錯誤: {e}")
-        reply_text = "抱歉，我現在無法處理您的請求。"
+    # 分流處理
+    if user_message == "我想看股價！":
+        reply_text = handle_stock_price(event.source.user_id)
+    elif user_message == "我想看走勢圖！":
+        reply_text = handle_stock_chart(event.source.user_id)
+    elif user_message == "我想知道最新時事！":
+        reply_text = handle_news_summary(event.source.user_id)
+    else:
+        # 預設使用 Gemini 回覆
+        try:
+            response = model.generate_content(user_message)
+            reply_text = response.text.strip()
+        except Exception as e:
+            app.logger.error(f"Gemini 回應錯誤: {e}")
+            reply_text = "抱歉，我現在無法處理您的請求。"
 
-    # 傳送回覆給使用者
     line_bot_api.reply_message(
         event.reply_token,
         TextSendMessage(text=reply_text)
