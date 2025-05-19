@@ -1,18 +1,18 @@
 import os
-from dotenv import load_dotenv
-load_dotenv()
-import google.generativeai as genai
-import twstock
 import re
+import twstock
 import cloudinary
 import cloudinary.uploader
+import google.generativeai as genai
 import matplotlib
-matplotlib.use('Agg')  # For server compatibility
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import pandas as pd
 from datetime import datetime
+from dotenv import load_dotenv
 
-# 設定 Gemini API 金鑰
+load_dotenv()
+
 genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 cloudinary.config(
@@ -21,10 +21,9 @@ cloudinary.config(
     api_secret=os.getenv('CLOUDINARY_API_SECRET')
 )
 
-# 建立 Gemini 模型
-gemini_model = genai.GenerativeModel('gemini-pro')
+model = genai.GenerativeModel(model_name="models/gemini-1.5-flash")
 
-default_data = { ... }  # 原本的股票代碼 dict 照樣保留（已省略，請用你的版本補上）
+default_data = { ... }  # 請使用你自己的股票代碼對照表
 
 def extract_stock_id(user_input: str) -> list:
     match = re.findall(r'\d{4,6}', user_input)
@@ -34,18 +33,14 @@ def extract_stock_id(user_input: str) -> list:
     try:
         prompt = f"""
         你是一個可以提取與辨識公司股票代號的助手。
-        功能一：提取句子中的數字代碼，或是，
-        功能二：回答句子中提及的可辨識的公司名稱所對應的股票代號，只輸出純數字。
         以下是使用者輸入：
         {user_input}
         常見代碼如下：
         {default_data}
-        如果沒有找到與公司相關的股票資訊的話，請只回答 "None"
+        如果沒有找到與公司相關的股票資訊，請回答 "None"
         """
-
-        response = gemini_model.generate_content(prompt)
+        response = model.generate_content([prompt])
         ai_response = response.text.strip()
-
         match = re.findall(r'\d{4,6}', ai_response)
         return match if match else None
     except Exception as e:
@@ -60,7 +55,7 @@ def get_stock_info(stock_id: str) -> str:
         recent_highs = stock.high[-25:]
 
         if None in recent_prices or None in recent_highs:
-            return f"抱歉，無法取得 {stock_id} 的完整數據，請稍後再試。"
+            return f"抱歉，無法取得 {stock_id} 的完整數據。"
 
         result = f"股票代號：{stock_id}\n近五日數據：\n"
         for i in range(len(recent_dates)):
@@ -68,76 +63,60 @@ def get_stock_info(stock_id: str) -> str:
             result += f"- 日期：{date_str}，收盤價：{recent_prices[i]}，高點：{recent_highs[i]}\n"
         return result
     except Exception as e:
-        return f"抱歉，無法取得股票代號 {stock_id} 的資訊。\n錯誤原因：{e}"
+        return f"無法取得 {stock_id} 的資訊。\n錯誤原因：{e}"
 
 def process_user_input(user_input: str) -> str:
     stock_ids = extract_stock_id(user_input)
     if stock_ids:
-        stock_info = ''
-        for sid in stock_ids:
-            stock_info += get_stock_info(sid) + '\n'
+        stock_info = ''.join(get_stock_info(sid) + '\n' for sid in stock_ids)
         return chat_with_gpt(f"使用者輸入：{user_input}\n以下是股票 {stock_ids} 的資訊：\n{stock_info}\n請先整理資訊，再提供分析與建議。")
-    else:
-        return chat_with_gpt(user_input)
+    return chat_with_gpt(user_input)
 
 def chat_with_gpt(prompt: str) -> str:
     try:
         messages = [
-            "你是一個使用繁體中文的聊天機器人，專門回答股票相關問題。若沒有收到股票資訊，可以建議使用者提供股票代碼。",
+            "你是一個使用繁體中文的聊天機器人，專門回答股票相關問題。",
             prompt
         ]
-        response = gemini_model.generate_content(messages)
+        response = model.generate_content([messages])
         return response.text.strip()
     except Exception as e:
         return f"Gemini 回應錯誤: {e}"
 
-def upload_to_cloudinary(file_path) -> str:
+def upload_to_cloudinary(file_path: str) -> str:
     try:
         response = cloudinary.uploader.upload(file_path)
         return response['secure_url']
     except Exception as e:
-        print(f"Image upload failed: {e}")
+        print(f"上傳失敗: {e}")
         return None
 
-def txt_to_img_url(stock_ids: str) -> str:
+def txt_to_img_url(stock_id: str) -> str:
     try:
-        sid = stock_ids
-        stock = twstock.Stock(sid)
-        file_name = f'{sid}.png'
+        stock = twstock.Stock(stock_id)
+        file_name = f'{stock_id}.png'
 
-        # 準備股票資料
-        stock_data = {
-            'close': stock.close,
+        df = pd.DataFrame({
             'date': stock.date,
-            'high': stock.high,
-            'low': stock.low,
-            'open': stock.open
-        }
+            'close': stock.close
+        })
 
-        df = pd.DataFrame.from_dict(stock_data)
-
-        # 畫圖
         df.plot(x='date', y='close')
-        plt.title(f'{sid} stock price')
+        plt.title(f'{stock_id} Stock Price')
         plt.savefig(file_name)
         plt.close()
 
-        # 上傳到 Cloudinary
         image_url = upload_to_cloudinary(file_name)
-
         if image_url:
             os.remove(file_name)
-            return image_url
-        else:
-            return None
-
+        return image_url
     except Exception as e:
-        print(f"Error generating stock trend chart: {e}")
+        print(f"產生圖表錯誤: {e}")
         return None
 
 if __name__ == "__main__":
     # 測試 1：文字轉圖並上傳 Cloudinary
-    stock_code = "2330"  # 台積電
+    stock_code = "006208"
     img_url = txt_to_img_url(stock_code)
     if img_url:
         print(f"圖片已上傳：{img_url}")
