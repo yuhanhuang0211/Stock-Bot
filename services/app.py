@@ -8,9 +8,9 @@ import google.generativeai as genai
 import logging
 
 # 匯入三大功能模組
-from services.stock_price import handle_stock_price
-from services.stock_chart import handle_stock_chart
-from services.news_summary import handle_news_summary
+from stock_price import handle_stock_price
+from stock_chart import handle_stock_chart
+from news_summary import handle_news_summary
 
 # 載入 .env
 load_dotenv()
