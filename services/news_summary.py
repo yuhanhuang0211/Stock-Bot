@@ -125,9 +125,9 @@ def get_news_summary(query: str) -> str:
             f"📰 {article_data.get('title', '無標題')}",
             (f"📅 發布: {article_data['publish_date']}" if article_data['publish_date'] else "📅 發布日期未知"),
             f"🔍 來源: {article_data.get('source', '未知')}",
-            "─────────────────",
-            f"📄 新聞摘要 (newspaper4k):\n{article_data.get('summary', '無法產生摘要。')}",
-            "─────────────────",
+            "──────────────",
+            f"📄 新聞摘要:\n{article_data.get('summary', '無法產生摘要。')}",
+            "──────────────",
             f"🔗 完整新聞: {article_data.get('url', '#')}"
         ]
         result_string = "\n\n".join(part for part in reply_parts if part)
@@ -139,7 +139,7 @@ def get_news_summary(query: str) -> str:
         return "抱歉，新聞查詢服務目前遇到一些問題，請稍後再試。"
 
 if __name__ == "__main__":
-    logger.info("測試 news_summary.py（使用 newspaper4k）...")
+    logger.info("測試 news_summary.py...")
     test_query = "台積電股價"
     summary = get_news_summary(test_query)
     print(f"\n--- 測試查詢「{test_query}」 ---")
