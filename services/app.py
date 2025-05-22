@@ -23,8 +23,8 @@ import google.generativeai as genai
 
 # 匯入三大功能模組
 from stock_price import get_stock_price
-from stock_chart import generate_stock_chart_url
-from news_summary import get_news_summary
+from stock_chart import txt_to_img_url
+from news_summary import Google_search_news
 
 # 載入 .env 變數
 load_dotenv()
