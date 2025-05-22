@@ -2,7 +2,7 @@
 
 GDG on Campus NTPU LINE Bot 小專案
 
-本專案旨在創建一個能夠即時分析股市的 LINE Bot，利用 Gemini API、matplotlib 和 Cloudinary，以及 newspaper 等工具/套件提供服務，使用者可以查詢股市基礎資訊、查看股價走勢圖，或者讓 Bot 從網路上搜尋、統整出最新的新聞內容。
+本專案旨在創建一個能夠即時分析股市的 LINE Bot，利用 Gemini API、matplotlib 和 Cloudinary，以及 newspaper4k 等工具/套件提供服務，使用者可以查詢股市基礎資訊、查看股價走勢圖，或者讓 Bot 從網路上搜尋、統整出最新的新聞內容。
 
 讓你的投資路不再孤單，我們在 LINE 等你！
 
