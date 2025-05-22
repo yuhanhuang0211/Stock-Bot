@@ -33,23 +33,60 @@ else:
     logging.warning("Cloudinary API (stock_chart) 未完整設定，圖片上傳功能將無法使用。")
 
 # --- 字型設定 (針對 Matplotlib 中文顯示) ---
-FONT_PATHS = [
-    'C:/Windows/Fonts/msyh.ttc',
-    'C:/Windows/Fonts/simhei.ttf',
-    '/System/Library/Fonts/PingFang.ttc',
-    '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
-]
-CHINESE_FONT = None
-for font_path in FONT_PATHS:
-    if os.path.exists(font_path):
-        try:
-            CHINESE_FONT = fm.FontProperties(fname=font_path)
-            logging.info(f"成功載入中文字型 (stock_chart): {font_path}")
-            break
-        except Exception as e:
-            logging.warning(f"嘗試載入字型 {font_path} 失敗 (stock_chart): {e}")
-if not CHINESE_FONT:
-    logging.warning("未找到任何預設的中文字型 (stock_chart)，圖表中的中文可能無法正常顯示。")
+def _setup_chinese_font():
+    """設定中文字型"""
+    FONT_PATHS = [
+        'C:/Windows/Fonts/msjh.ttc',          # 微軟正黑體
+        'C:/Windows/Fonts/mingliu.ttc',       # 新細明體
+        '/System/Library/Fonts/PingFang.ttc', # macOS
+        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc', # Linux
+        '/usr/share/fonts/truetype/arphic/uming.ttc',     # Linux
+    ]
+    
+    for font_path in FONT_PATHS:
+        if os.path.exists(font_path):
+            try:
+                font_prop = fm.FontProperties(fname=font_path)
+                # 測試字型是否能正確載入
+                test_font = fm.get_font(font_path)
+                logging.info(f"成功載入中文字型 (stock_chart): {font_path}")
+                return font_prop
+            except Exception as e:
+                logging.warning(f"嘗試載入字型 {font_path} 失敗 (stock_chart): {e}")
+                continue
+    
+    # 如果找不到字型檔案，嘗試使用系統已安裝的中文字型
+    try:
+        # 嘗試常見的中文字型名稱
+        chinese_fonts = [
+            'Microsoft JhengHei',   # 正黑體
+            'STHeiti',              # macOS
+            'PingFang SC',          # macOS
+            'WenQuanYi Micro Hei',  # Linux
+        ]
+        
+        available_fonts = [f.name for f in fm.fontManager.ttflist]
+        
+        for font_name in chinese_fonts:
+            if font_name in available_fonts:
+                font_prop = fm.FontProperties(family=font_name)
+                logging.info(f"使用系統字型: {font_name}")
+                return font_prop
+        
+        logging.warning("未找到任何中文字型，將使用預設字型")        
+        return None
+        
+    except Exception as e:
+        logging.error(f"設定字型時發生錯誤: {e}")
+        return None
+
+# 初始化字型
+CHINESE_FONT = _setup_chinese_font()
+
+# 設定 matplotlib 預設字型
+if CHINESE_FONT:
+    plt.rcParams['font.sans-serif'] = [CHINESE_FONT.get_name()]
+    plt.rcParams['axes.unicode_minus'] = False  # 解決負號顯示問題
 
 # --- 股票代碼資料 ---
 default_stock_data = {
