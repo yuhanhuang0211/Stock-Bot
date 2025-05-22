@@ -12,7 +12,7 @@ from linebot.v3.messaging import (
     MessagingApi,
     ReplyMessageRequest,
     TextMessage as V3TextMessage,
-    ImageSendMessage
+    ImageMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
