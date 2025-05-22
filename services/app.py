@@ -119,7 +119,7 @@ def handle_text_message(event: MessageEvent):
     current_action = user_next_action.pop(user_id, None) # 取得並清除目前狀態
 
     try:
-        # 1. 優先處理多輪對話的狀態
+        # 1. 對話分流
         if current_action == STATE_WAITING_STOCK_ID_FOR_PRICE:
             stock_id_input = user_message
             price_info = get_stock_price(stock_id_input) # 例如輸入 "2330"
@@ -129,30 +129,30 @@ def handle_text_message(event: MessageEvent):
             stock_identifier_input = user_message # 可為 "2330" 或 "台積電"
             chart_url = generate_stock_chart_url(stock_identifier_input)
             if chart_url:
-                reply_objects.append(ImageSendMessage(
+                reply_objects.append(ImageMessage(
                     original_content_url=chart_url,
-                    preview_image_url=chart_url # 對 LINE 而言，預覽與原始圖可相同
+                    preview_image_url=chart_url
                 ))
             else:
                 reply_objects.append(V3TextMessage(text=f"抱歉，無法產生「{stock_identifier_input}」的走勢圖。"))
 
         elif current_action == STATE_WAITING_KEYWORD_FOR_NEWS:
             news_keyword = user_message
-            news_summary_text = get_news_summary(news_keyword) # 輸入搜尋關鍵字
+            news_summary_text = get_news_summary(news_keyword)
             reply_objects.append(V3TextMessage(text=news_summary_text))
             
-        # 2. 處理從富功能選單或文字輸入觸發的初始命令
-        elif user_message == "我想看股價": # 富選單動作傳送的文字
+        # 2. 圖文選單關鍵字句
+        elif user_message == "我想看股價！":
             user_next_action[user_id] = STATE_WAITING_STOCK_ID_FOR_PRICE
-            reply_objects.append(V3TextMessage(text="好的！請輸入您想查詢的股票代號："))
+            reply_objects.append(V3TextMessage(text="好的！請輸入您想查詢的股票代號或公司名稱"))
             
-        elif user_message == "我想看走勢圖":
+        elif user_message == "我想看走勢圖！":
             user_next_action[user_id] = STATE_WAITING_STOCK_ID_FOR_CHART
-            reply_objects.append(V3TextMessage(text="沒問題～請輸入股票代號或公司全名："))
+            reply_objects.append(V3TextMessage(text="沒問題～請輸入股票代號或公司名稱"))
             
-        elif user_message == "我想知道最近的股市時事":
+        elif user_message == "我想知道最新時事！":
             user_next_action[user_id] = STATE_WAITING_KEYWORD_FOR_NEWS
-            reply_objects.append(V3TextMessage(text="交給我！請輸入您想查詢的股市時事關鍵字："))
+            reply_objects.append(V3TextMessage(text="交給我！請輸入您想查詢的關鍵字句"))
             
         # 3. 預設轉交 Gemini 處理一般聊天
         else:
@@ -167,7 +167,7 @@ def handle_text_message(event: MessageEvent):
                         if str(response.prompt_feedback.block_reason) != "BLOCK_REASON_UNSPECIFIED":
                             app.logger.warning(f"Gemini 封鎖回覆內容: '{user_message}'。原因: {response.prompt_feedback.block_reason}")
                             gemini_reply = "抱歉，我無法回覆此內容，可能涉及敏感資訊。"
-                    if not gemini_reply: # 若仍無回覆（例如回應為空）
+                    if not gemini_reply:
                          gemini_reply = "嗯...我目前無法處理這個請求。"
                     reply_objects.append(V3TextMessage(text=gemini_reply))
                 except Exception as e:
@@ -182,7 +182,7 @@ def handle_text_message(event: MessageEvent):
             messaging_api.reply_message(
                 ReplyMessageRequest(
                     reply_token=event.reply_token,
-                    messages=reply_objects # 傳送訊息物件列表
+                    messages=reply_objects
                 )
             )
             app.logger.info(f"已回覆使用者 {user_id}，共 {len(reply_objects)} 筆訊息。")
