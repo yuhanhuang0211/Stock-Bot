@@ -19,9 +19,9 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 import google.generativeai as genai
 
 # 匯入三大功能模組
-from stock_price import get_stock_price
-from stock_chart import generate_stock_chart_url
-from news_summary import get_news_summary
+from services.stock_price import get_stock_price
+from services.stock_chart import generate_stock_chart_url
+from services.news_summary import get_news_summary
 
 # 載入 .env 變數
 load_dotenv()
