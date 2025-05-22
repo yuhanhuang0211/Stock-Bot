@@ -166,25 +166,45 @@ def _generate_chart_image_and_upload(stock_id: str, stock_name_for_title: str | 
             logging.warning(f"股票 {stock_id} 的資料在過濾後不足以繪圖。")
             return None
 
-        plt.style.use('seaborn-v0_8-darkgrid')
+        # 使用更簡潔的樣式
+        plt.style.use('seaborn-v0_8-whitegrid')
         fig, ax = plt.subplots(figsize=(10, 5.625))
 
-        ax.plot(df_recent['date'], df_recent['close'], marker='.', linestyle='-', linewidth=1.5, label='收盤價')
+        ax.plot(df_recent['date'], df_recent['close'], marker='.', linestyle='-', linewidth=1.5, label='收盤價', color='#1f77b4')
 
         title_text = f"{stock_name_for_title} ({stock_id})" if stock_name_for_title else stock_id
-        ax.set_title(f"{title_text} 股價走勢圖 (近一年)", fontproperties=CHINESE_FONT, fontsize=16, pad=15)
-        ax.set_xlabel("日期", fontproperties=CHINESE_FONT, fontsize=12)
-        ax.set_ylabel("價格 (TWD)", fontproperties=CHINESE_FONT, fontsize=12)
+        
+        # 設定標題和軸標籤，明確指定字型
+        if CHINESE_FONT:
+            ax.set_title(f"{title_text} 股價走勢圖 (近一年)", fontproperties=CHINESE_FONT, fontsize=16, pad=15)
+            ax.set_xlabel("日期", fontproperties=CHINESE_FONT, fontsize=12)
+            ax.set_ylabel("價格 (TWD)", fontproperties=CHINESE_FONT, fontsize=12)
+        else:
+            ax.set_title(f"{title_text} Stock Price Trend (Recent Year)", fontsize=16, pad=15)
+            ax.set_xlabel("Date", fontsize=12)
+            ax.set_ylabel("Price (TWD)", fontsize=12)
 
-        plt.xticks(rotation=30, ha='right', fontproperties=CHINESE_FONT, fontsize=9)
-        plt.yticks(fontproperties=CHINESE_FONT, fontsize=9)
+        # 設定刻度標籤字型
+        if CHINESE_FONT:
+            plt.setp(ax.get_xticklabels(), fontproperties=CHINESE_FONT, fontsize=9, rotation=30, ha='right')
+            plt.setp(ax.get_yticklabels(), fontproperties=CHINESE_FONT, fontsize=9)
+        else:
+            plt.setp(ax.get_xticklabels(), fontsize=9, rotation=30, ha='right')
+            plt.setp(ax.get_yticklabels(), fontsize=9)
 
-        ax.legend(prop=CHINESE_FONT, fontsize=10)
+        # 設定圖例
+        if CHINESE_FONT:
+            ax.legend(prop=CHINESE_FONT, fontsize=10)
+        else:
+            ax.legend(fontsize=10)
+            
         ax.grid(True, linestyle='--', alpha=0.6)
         plt.tight_layout()
 
         with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_image_file:
-            plt.savefig(temp_image_file.name, dpi=90)
+            # 明確指定編碼和DPI
+            plt.savefig(temp_image_file.name, dpi=100, bbox_inches='tight', 
+                       facecolor='white', edgecolor='none')
             temp_file_path = temp_image_file.name
 
         plt.close(fig)
